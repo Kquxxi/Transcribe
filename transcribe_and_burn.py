@@ -106,18 +106,19 @@ def generate_karaoke_ass(segments):
     style.alignment    = 5  # Wyśrodkowanie na dole
     subs.styles[style.name] = style
 
-    # === ZMIANA: Ponowne dodanie dedykowanego stylu dla Emoji ===
-    # Ten styl jest potrzebny, aby wskazać właściwą czcionkę.
-    # Kolor zostanie nadpisany w linii tekstu, aby wymusić kolor z czcionki.
+    # Styl dla emoji z wyłączonym konturem i cieniem
     emoji_style = pysubs2.SSAStyle()
     emoji_style.name = "Emoji"
     emoji_style.fontname = "Segoe UI Emoji"
     emoji_style.fontsize = 64
+    emoji_style.primarycolor = pysubs2.Color(r=255, g=255, b=255)  # Biały jako fallback
+    emoji_style.outline = 0  # WYŁĄCZENIE konturu
+    emoji_style.shadow = 0   # WYŁĄCZENIE cienia
+    emoji_style.borderstyle = 0  # Brak obramowania
     emoji_style.alignment = 5
     subs.styles[emoji_style.name] = emoji_style
 
-
-    # === ZMIANA: Pozycja tekstu przesunięta wyżej ===
+    # Pozycja tekstu przesunięta wyżej
     cx = subs.info["PlayResX"] // 2
     cy = int(subs.info["PlayResY"] * 0.70) # 70% wysokości ekranu
 
@@ -149,12 +150,11 @@ def generate_karaoke_ass(segments):
             
         subs.append(pysubs2.SSAEvent(start=start_ms, end=end_ms, style=style.name, text=line.strip()))
 
-        # Dodawanie emoji jako osobne zdarzenie
+        # Dodawanie emoji jako osobne zdarzenie z oryginalnym stylem
         if emoji:
-            # === ZMIANA: Uproszczony tekst emoji z użyciem stylu "Emoji" ===
-            # Używamy tagu \1a&HFF&, aby ustawić przezroczystość koloru na 100%,
-            # co zmusza renderer do użycia koloru z samej czcionki.
-            emoji_text = f"{{\\an5\\pos({cx},{cy+80})\\1a&HFF&}}{emoji}"
+            # Używamy prostego tekstu emoji bez dodatkowych tagów kolorystycznych
+            # co pozwala na wyświetlenie oryginalnych kolorów emoji
+            emoji_text = f"{{\\an5\\pos({cx},{cy+80})}}{emoji}"
             subs.append(pysubs2.SSAEvent(start=start_ms, end=end_ms, style="Emoji", text=emoji_text))
 
     subs.save(str(ASS_FILE))
