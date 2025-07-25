@@ -9,121 +9,178 @@ import whisper
 import pysubs2
 
 # ------------------------------------------------------------------
-# Ensure FFmpeg is found by prepending its bin directory to PATH
+# Upewnij się, że FFmpeg jest w ścieżce PATH
+# Zmień tę ścieżkę, jeśli FFmpeg jest zainstalowany gdzie indziej
 dl = r"C:\ffmpeg\bin"
-os.environ["PATH"] = dl + os.pathsep + os.environ.get("PATH", "")
-FFMPEG = Path(dl) / "ffmpeg.exe"
+if Path(dl).exists():
+    os.environ["PATH"] = dl + os.pathsep + os.environ.get("PATH", "")
+    FFMPEG = Path(dl) / "ffmpeg.exe"
+else:
+    # Jeśli nie ma w podanej ścieżce, spróbuj użyć ffmpeg z systemowej ścieżki PATH
+    FFMPEG = "ffmpeg" 
 # ------------------------------------------------------------------
 
-# Project paths
+# Ścieżki projektu
 dir_proj = Path(__file__).parent
 IN_VIDEO  = dir_proj / "in.mp4"
 WAV_FILE  = dir_proj / "in.wav"
 ASS_FILE  = dir_proj / "out_karaoke_tiktok.ass"
 OUT_VIDEO = dir_proj / "out_with_karaoke_tiktok.mp4"
 
-# List of Polish curse words to censor
+# Rozszerzona lista polskich wulgaryzmów do cenzury
 CURSE_WORDS = [
-    "kurwa", "chuj", "pizda", "skurwysyn",
-    "jebany", "pedał", "jebać"
+    "kurwa", "kurwy", "kurw", "chuj", "chuje", "chujek", "chujnia",
+    "pizda", "pizdy", "pizdzie", "skurwysyn", "skurwysyna", "skurwiel",
+    "jebany", "jebac", "jebać", "jebią", "japierdole", "pierdol", "pierdolę",
+    "ciota", "cipa", "cipie", "dupku", "dupa", "dupka", "dupy",
+    "pedał", "pizdunska", "masturbuj", "suka", "szmata", "gówno", "gowno"
 ]
 
-def censor_text(text: str) -> str:
-    """
-    Replace curse words in the text with asterisks.
-    """
-    pattern = re.compile(r"\b(" + "|".join(CURSE_WORDS) + r")\b", re.IGNORECASE)
-    return pattern.sub(lambda m: "*" * len(m.group()), text)
-
-# TikTok-friendly neon colors (BBGGRR format)
+# Neonowe kolory w stylu TikToka w formacie &HBBGGRR&
 TIKTOK_COLORS = [
     "&H00FF00FF&",  # magenta
     "&H00FFFF00&",  # cyan
     "&H0000FFFF&",  # yellow
-    "&H0080FF00&",  # green
+    "&H0080FF00&",  # lime
     "&H00FF8000&"   # orange
 ]
 
-# 1) Extract audio
+# Rozszerzona lista emoji
+EMOJIS = [
+    "🔥","💥","✨","🎉","😎","🚀","💯","👀","🥳",
+    "😂","😍","🤣","😁","🙌","👌","🤩","🌟","🎊"
+]
+
+# Funkcja pomocnicza: cenzurowanie tekstu
+def censor_text(text: str) -> str:
+    """Zamienia wulgaryzmy w tekście na gwiazdki."""
+    pattern = re.compile(r"\b(" + "|".join(CURSE_WORDS) + r")\b", re.IGNORECASE)
+    return pattern.sub(lambda m: "*" * len(m.group()), text)
+
+# 1) Ekstrakcja audio do formatu WAV
 def extract_audio():
+    """Wyodrębnia ścieżkę audio z wideo i zapisuje jako plik WAV."""
+    if not IN_VIDEO.exists():
+        print(f"❌ Błąd: Plik wideo wejściowego nie został znaleziony w {IN_VIDEO}")
+        return False
+    print("🔊 Rozpoczynam ekstrakcję audio...")
     subprocess.run([
         str(FFMPEG), "-y", "-i", str(IN_VIDEO),
         "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", str(WAV_FILE)
-    ], check=True)
-    print("[OK] Audio extracted to WAV.")
+    ], check=True, capture_output=True, text=True)
+    print("[OK] Audio zostało wyodrębnione do pliku WAV.")
+    return True
 
-# 2) Transcribe with Whisper
+# 2) Transkrypcja audio przy użyciu Whisper
 def transcribe_segments():
+    """Transkrybuje plik audio i zwraca segmenty z tekstem i znacznikami czasu."""
+    if not WAV_FILE.exists():
+        print(f"❌ Błąd: Plik WAV nie został znaleziony w {WAV_FILE}")
+        return None
+    print("✍️ Rozpoczynam transkrypcję (to może potrwać)...")
     model = whisper.load_model("small")
-    result = model.transcribe(str(WAV_FILE), language="pl")
-    print("[OK] Whisper transcription done.")
+    result = model.transcribe(str(WAV_FILE), language="pl", fp16=False)
+    print("[OK] Transkrypcja Whisper zakończona.")
     return result["segments"]
 
-# 3) Generate karaoke-style ASS with center positioning, nicer font, color and censorship
+# 3) Generowanie napisów w formacie ASS
 def generate_karaoke_ass(segments):
+    """Tworzy plik napisów .ass w stylu karaoke z animacjami i emoji."""
+    if not segments:
+        print("⚠️ Brak segmentów do przetworzenia. Pomijam tworzenie napisów.")
+        return False
+        
+    print("🎨 Generuję napisy w stylu karaoke...")
     subs = pysubs2.SSAFile()
     subs.info.update({"ScriptType": "v4.00+", "PlayResX": 1920, "PlayResY": 1080})
 
-    # Define base centered style with a nicer font
+    # Podstawowy styl dla karaoke
     style = pysubs2.SSAStyle()
     style.name         = "Karaoke"
     style.fontname     = "Bebas Neue"
-    style.fontsize     = 60
-    style.primarycolor = "&H00FFFFFF&"
-    style.backcolor    = "&H80000000&"
+    style.fontsize     = 64
+    style.primarycolor = pysubs2.Color(r=255, g=255, b=255) # Biały
+    style.backcolor    = pysubs2.Color(r=0, g=0, b=0, a=128) # Półprzezroczyste czarne tło
     style.outline      = 2
     style.shadow       = 1
-    style.alignment    = 5  # middle-center
-    style.margin_v     = 0
+    style.alignment    = 5  # Wyśrodkowanie na dole
     subs.styles[style.name] = style
 
-    # Center coordinates
-    center_x = subs.info["PlayResX"] // 2
-    center_y = subs.info["PlayResY"] // 2
+    # === ZMIANA: Ponowne dodanie dedykowanego stylu dla Emoji ===
+    # Ten styl jest potrzebny, aby wskazać właściwą czcionkę.
+    # Kolor zostanie nadpisany w linii tekstu, aby wymusić kolor z czcionki.
+    emoji_style = pysubs2.SSAStyle()
+    emoji_style.name = "Emoji"
+    emoji_style.fontname = "Segoe UI Emoji"
+    emoji_style.fontsize = 64
+    emoji_style.alignment = 5
+    subs.styles[emoji_style.name] = emoji_style
 
-    # Build events
+
+    # === ZMIANA: Pozycja tekstu przesunięta wyżej ===
+    cx = subs.info["PlayResX"] // 2
+    cy = int(subs.info["PlayResY"] * 0.70) # 70% wysokości ekranu
+
     for seg in segments:
-        text = seg.get("text", "").strip()
-        text = censor_text(text)
+        text = censor_text(seg.get("text", "").strip())
         if not text:
             continue
+            
         words = text.split()
         start_ms = int(seg["start"] * 1000)
         end_ms   = int(seg["end"] * 1000)
-        total_ms = end_ms - start_ms
+        duration = end_ms - start_ms
+        if duration <= 0: continue
+        
         total_chars = sum(len(w) for w in words)
+        if total_chars == 0: continue
 
-        # Choose a random neon color for this segment
         color = random.choice(TIKTOK_COLORS)
-        karaoke_text = f"{{\\pos({center_x},{center_y})\\c{color}}}"
+        add_emoji = random.random() < 0.3
+        emoji = random.choice(EMOJIS) if add_emoji else None
 
-        # Assign durations weighted by character length
+        # Budowanie linii karaoke bez efektu pulsowania
+        line = f"{{\\an5\\pos({cx},{cy})\\c{color}}}"
         for w in words:
-            dur_cs = max(int((len(w) / total_chars) * total_ms / 10), 1)
-            karaoke_text += f"{{\\k{dur_cs}}}{w} "
+            word_dur = max(int((len(w) / total_chars) * duration), 50)
+            k_dur = max(word_dur // 10, 1) # Czas trwania podświetlenia w centysekundach
+            
+            line += f"{{\\k{k_dur}}}{w} "
+            
+        subs.append(pysubs2.SSAEvent(start=start_ms, end=end_ms, style=style.name, text=line.strip()))
 
-        subs.append(pysubs2.SSAEvent(
-            start=start_ms,
-            end=end_ms,
-            style=style.name,
-            text=karaoke_text.strip()
-        ))
+        # Dodawanie emoji jako osobne zdarzenie
+        if emoji:
+            # === ZMIANA: Uproszczony tekst emoji z użyciem stylu "Emoji" ===
+            # Używamy tagu \1a&HFF&, aby ustawić przezroczystość koloru na 100%,
+            # co zmusza renderer do użycia koloru z samej czcionki.
+            emoji_text = f"{{\\an5\\pos({cx},{cy+80})\\1a&HFF&}}{emoji}"
+            subs.append(pysubs2.SSAEvent(start=start_ms, end=end_ms, style="Emoji", text=emoji_text))
 
     subs.save(str(ASS_FILE))
-    print(f"[OK] Saved TikTok-style karaoke ASS with {len(subs.events)} lines.")
+    print(f"[OK] Zapisano napisy ASS z {len(subs.events)} zdarzeniami.")
+    return True
 
-# 4) Burn-in ASS to video
+# 4) Wypalanie napisów w pliku wideo
 def burn_karaoke():
+    """Wypala napisy z pliku .ass na wideo przy użyciu FFmpeg."""
+    if not ASS_FILE.exists():
+        print(f"❌ Błąd: Plik z napisami nie został znaleziony w {ASS_FILE}")
+        return
+        
+    print("🎬 Rozpoczynam wypalanie napisów na wideo...")
+    # Użycie cwd=dir_proj sprawia, że FFmpeg poprawnie znajduje plik .ass
     subprocess.run([
         str(FFMPEG), "-y", "-i", str(IN_VIDEO),
         "-vf", f"ass={ASS_FILE.name}",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "22",
         "-c:a", "copy", str(OUT_VIDEO)
-    ], check=True, cwd=str(dir_proj))
-    print(f"✅ Done! Output with karaoke: {OUT_VIDEO}")
+    ], check=True, cwd=str(dir_proj), capture_output=True, text=True)
+    print(f"✅ Gotowe! Wynikowy plik wideo: {OUT_VIDEO}")
 
+# Główna funkcja wykonująca wszystkie kroki
 if __name__ == "__main__":
-    extract_audio()
-    segments = transcribe_segments()
-    generate_karaoke_ass(segments)
-    burn_karaoke()
+    if extract_audio():
+        segments = transcribe_segments()
+        if generate_karaoke_ass(segments):
+            burn_karaoke()
